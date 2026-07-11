@@ -20,6 +20,8 @@
     "playbook.py": { "checksum": "" },
     "file_generator.py": { "checksum": "" },
     "prompt_builder.py": { "checksum": "" },
+    "examples_library.py": { "checksum": "" },
+    "worked_examples.py": { "checksum": "" },
     "static/new.html": { "checksum": "" },
     "requirements.txt": { "checksum": "" }
   }

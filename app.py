@@ -27,6 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from domain_context import DOMAIN_CONTEXT
 from playbook import PLAYBOOK
+from worked_examples import WORKED_EXAMPLES
 from prompt_builder import build_response, build_session_log_skeleton
 from file_generator import generate_all_files
 
@@ -49,6 +50,9 @@ def meta():
         },
         "playbook": [
             {"id": p["id"], "name": p["name"], "desc": p["desc"]} for p in PLAYBOOK
+        ],
+        "worked_examples": [
+            {"id": p["id"], "name": p["name"], "desc": p["desc"]} for p in WORKED_EXAMPLES
         ],
     })
 

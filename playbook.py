@@ -464,10 +464,15 @@ QUALIFY overall_rank <= 10;   -- adjust N, or drop QUALIFY to keep the full rank
 ]
 
 
+from worked_examples import WORKED_EXAMPLES
+
+ALL_PATTERNS = PLAYBOOK + WORKED_EXAMPLES
+
+
 def get_pattern(pattern_id: str) -> dict | None:
-    return next((p for p in PLAYBOOK if p["id"] == pattern_id), None)
+    return next((p for p in ALL_PATTERNS if p["id"] == pattern_id), None)
 
 
 def get_patterns(pattern_ids: list[str]) -> list[dict]:
-    by_id = {p["id"]: p for p in PLAYBOOK}
+    by_id = {p["id"]: p for p in ALL_PATTERNS}
     return [by_id[pid] for pid in pattern_ids if pid in by_id]

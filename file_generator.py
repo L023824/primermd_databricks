@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 
 from domain_context import DOMAIN_CONTEXT
 from playbook import PLAYBOOK, get_patterns
-from prompt_builder import _domain_blurb, _render_kpi_block, _slugify
+from worked_examples import WORKED_EXAMPLES
+from prompt_builder import _domain_blurb, _render_kpi_block, _slugify, gen_suggested_prompts_md
+from examples_library import EXAMPLES_LIBRARY_MD
 
 
 STYLING_GUIDE_MD = """# Styling guide — Lilly BI&A
@@ -82,7 +84,7 @@ def gen_claude_md(form: dict, patterns: list[dict]) -> str:
 
     pattern_names = ", ".join(p["name"] for p in patterns) if patterns else "none selected yet"
 
-    files_list = ["CLAUDE.md", "EXAMPLES.md", "kpi_definitions.md", "schema_reference.md", "stakeholder_notes.md"]
+    files_list = ["CLAUDE.md", "EXAMPLES.md", "kpi_definitions.md", "schema_reference.md", "stakeholder_notes.md", "prompt_helper.md", "examples_library.md"]
     if visual_output:
         files_list.insert(4, "styling_guide.md")
 
@@ -130,6 +132,13 @@ below as starting hints, not confirmed fact, until checked against the live cata
 
 ## Relevant patterns for this project
 {pattern_names}
+
+## Worked examples library
+`examples_library.md` ships with every project — 19 real, fully-worked BI&A query patterns
+(TUA, SoM waterfall, dosing/MoA classification, rolling NBRx, HCP segmentation, cross-TA
+overlap, and more) in Databricks/Spark SQL. Use it as a style/complexity reference and as a
+source of directly reusable logic — table names in it use a `<catalog>` placeholder that
+still needs confirming against the live Unity Catalog metastore.
 
 ## What to avoid
 - Don't invent column names that weren't confirmed live or typed in by hand.
@@ -250,7 +259,7 @@ def gen_additional_info_md(form: dict) -> str:
 
 
 def generate_all_files(form: dict) -> dict:
-    playbook_by_id = {p["id"]: p for p in PLAYBOOK}
+    playbook_by_id = {p["id"]: p for p in PLAYBOOK + WORKED_EXAMPLES}
     pattern_ids = list(form.get("pattern_ids", []))
     for kpi in form.get("kpis", []):
         if kpi.get("sql_source_mode") == "playbook" and kpi.get("sql_playbook_entry"):
@@ -265,6 +274,8 @@ def generate_all_files(form: dict) -> dict:
         "kpi_definitions.md": gen_kpi_definitions_md(form, playbook_by_id),
         "schema_reference.md": gen_schema_reference_md(form),
         "stakeholder_notes.md": gen_additional_info_md(form),
+        "prompt_helper.md": gen_suggested_prompts_md(form),
+        "examples_library.md": EXAMPLES_LIBRARY_MD,
     }
     if form.get("visual_output"):
         files["styling_guide.md"] = STYLING_GUIDE_MD

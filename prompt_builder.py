@@ -22,6 +22,8 @@ import re
 
 from domain_context import DOMAIN_CONTEXT
 from playbook import get_patterns, PLAYBOOK
+from worked_examples import WORKED_EXAMPLES
+from examples_library import EXAMPLES_LIBRARY_MD
 
 
 def _domain_blurb(ta: str, indication: str) -> str:
@@ -71,16 +73,25 @@ def _render_kpi_block(kpi: dict, playbook_by_id: dict) -> str:
                 f"against this KPI's actual tables/columns, not a different KPI's."
             )
             if is_redshift:
+                is_worked_example = pid.startswith("we_")
                 real_mappings = [m for m in mappings if (m.get("redshift") or "").strip()]
                 map_lines = "\n".join(
                     f"  - `{m.get('redshift','')}` → `{m.get('databricks','')}`" for m in real_mappings
                 ) or "  - (no tables mapped yet — ask me for the real Redshift table(s) this pattern replaces)"
-                sql_block += (
-                    "\n\nThis playbook pattern is carried over from the Redshift-era version of primerMD — "
-                    "treat its placeholder table refs (`<catalog>.<schema>.<table>`) as needing confirmation "
-                    "against the mapping below, not as already-resolved Databricks names:\n\n"
-                    f"{map_lines}"
-                )
+                if is_worked_example:
+                    note = (
+                        "\n\nThis worked example is carried over from the Redshift-era version of primerMD — "
+                        "its table references are real (not abstract placeholders), but the `<catalog>` prefix "
+                        "still needs resolving against the live Unity Catalog metastore. Use the mapping below "
+                        "to confirm each table, not just the catalog name:\n\n"
+                    )
+                else:
+                    note = (
+                        "\n\nThis playbook pattern is carried over from the Redshift-era version of primerMD — "
+                        "treat its placeholder table refs (`<catalog>.<schema>.<table>`) as needing confirmation "
+                        "against the mapping below, not as already-resolved Databricks names:\n\n"
+                    )
+                sql_block += note + map_lines
         else:
             sql_block = "**SQL logic:** playbook pattern selected but not resolved — ask me which pattern applies."
     elif mode == "paste":
@@ -138,6 +149,144 @@ def _render_kpi_block(kpi: dict, playbook_by_id: dict) -> str:
     return "\n\n".join(parts)
 
 
+def gen_suggested_prompts_md(form: dict) -> str:
+    """
+    Directional example prompts for actually working the project once the
+    scaffold exists — distinct from build_prompt() above, which is the
+    one-time meta-prompt that *builds* the scaffold itself. This is meant to
+    ship alongside the scaffold either way: as prompt_helper.md in the
+    direct-file-generation path, and as a companion block in the
+    generate-a-prompt path (see build_response()).
+    """
+    project_name = form.get("project_name", "Untitled project").strip() or "Untitled project"
+    kpis = [k for k in form.get("kpis", []) if (k.get("name") or "").strip()]
+    visual_output = bool(form.get("visual_output"))
+    playbook_by_id = {p["id"]: p for p in PLAYBOOK + WORKED_EXAMPLES}
+
+    es = form.get("email_search", {}) or {}
+    has_email_search = bool(
+        (es.get("subject_keywords") or "").strip()
+        or (es.get("participants") or "").strip()
+        or (es.get("keywords") or "").strip()
+    )
+
+    lines = [
+        f"# prompt_helper.md — {project_name}",
+        "",
+        "Directional starting points, not scripts — these are suggestions for what to type into Claude Code or a "
+        "Claude.ai session once the scaffold files are in place. Adapt freely, and swap in real table/column names "
+        "as you confirm them against the live schema.",
+        "",
+        "## Orient Claude first",
+        "```",
+        "Read CLAUDE.md, kpi_definitions.md, and EXAMPLES.md, then summarize back what you understand about this "
+        "project and its KPIs before we start — flag anything that looks incomplete or ambiguous.",
+        "```",
+        "",
+    ]
+
+    if kpis:
+        lines.append("## Per-KPI starting prompts")
+        lines.append("")
+        for k in kpis:
+            name = (k.get("name") or "Unnamed KPI").strip()
+            mode = k.get("sql_source_mode") or ""
+            is_redshift = bool(k.get("sql_redshift_legacy"))
+            if mode == "paste" and is_redshift:
+                p = (
+                    f"Rewrite the Redshift SQL I pasted for {name} into Databricks/Spark SQL — use the table "
+                    f"mapping in kpi_definitions.md as your starting point, and confirm every table/column against "
+                    f"the live schema before finalizing its EXAMPLES.md stub."
+                )
+            elif mode == "playbook" and is_redshift:
+                pid = k.get("sql_playbook_entry") or ""
+                pattern_name = playbook_by_id.get(pid, {}).get("name", "the selected pattern")
+                p = (
+                    f"Build {name} using the {pattern_name} pattern from EXAMPLES.md — resolve its placeholders "
+                    f"against the real schema, and confirm the Redshift-to-Databricks table mapping in "
+                    f"kpi_definitions.md before running anything."
+                )
+            elif mode == "playbook":
+                pid = k.get("sql_playbook_entry") or ""
+                pattern_name = playbook_by_id.get(pid, {}).get("name", "the selected pattern")
+                p = (
+                    f"Build {name} using the {pattern_name} pattern from EXAMPLES.md — resolve its placeholders "
+                    f"against the real schema before running anything."
+                )
+            elif mode == "paste":
+                p = (
+                    f"Verify the SQL I pasted for {name} against the live schema, then use it as the working "
+                    f"version for this KPI."
+                )
+            elif mode == "describe":
+                p = (
+                    f"Using the business rules described for {name} in kpi_definitions.md, write the Databricks "
+                    f"SQL — ask me first if any column name isn't already confirmed against the live schema."
+                )
+            else:
+                p = f"Build the SQL for {name} per kpi_definitions.md, at the grain and time window specified there."
+            lines.append(f"**{name}**")
+            lines.append("```")
+            lines.append(p)
+            lines.append("```")
+            lines.append("")
+
+        if len(kpis) > 1:
+            names = ", ".join((k.get("name") or "Unnamed KPI").strip() for k in kpis)
+            lines.append("## Cross-KPI check")
+            lines.append("```")
+            lines.append(
+                f"Compare {names} — confirm they share a consistent grain and time-window convention, and flag "
+                f"anything inconsistent before we build a combined view."
+            )
+            lines.append("```")
+            lines.append("")
+    else:
+        lines.append("_(No KPIs defined yet — add at least one on the KPIs tab to get KPI-specific prompt suggestions.)_")
+        lines.append("")
+
+    lines.append("## Validate before trusting the output")
+    lines.append("```")
+    lines.append(
+        "Before finalizing any KPI SQL, run a fan-out check (COUNT(*) vs. COUNT(DISTINCT id)) on every join, and "
+        "flag anything that doesn't match 1:1 expectations."
+    )
+    lines.append("```")
+    lines.append("")
+
+    if visual_output:
+        kpi_names = ", ".join((k.get("name") or "Unnamed KPI").strip() for k in kpis) if kpis else "the KPIs in scope"
+        lines.append("## Build the visual output")
+        lines.append("```")
+        lines.append(
+            f"Using styling_guide.md for Lilly brand conventions, build a dashboard for {kpi_names}. Lead with the "
+            f"headline metric per KPI, and label the most recent period if it's subject to data lag."
+        )
+        lines.append("```")
+        lines.append("")
+
+    if has_email_search:
+        lines.append("## Pull stakeholder context")
+        lines.append("```")
+        lines.append(
+            "Search Outlook/Teams per the criteria in stakeholder_notes.md's Outlook/Teams context search section, "
+            "then summarize anything relevant back to me — decisions, constraints, or prior analysis references — "
+            "before we finalize anything."
+        )
+        lines.append("```")
+        lines.append("")
+
+    lines.append("## When something feels off")
+    lines.append("```")
+    lines.append(
+        "Before you write any SQL, tell me which tables and columns you're about to assume exist that haven't yet "
+        "been confirmed against the live schema."
+    )
+    lines.append("```")
+
+    return "\n".join(lines)
+
+
 def build_prompt(form: dict) -> str:
     """
     form keys expected:
@@ -163,7 +312,7 @@ def build_prompt(form: dict) -> str:
     domain_blurb = _domain_blurb(ta, indication)
     schema_list = ", ".join(f"{catalog}.{s}" for s in schemas) if schemas else f"{catalog}.<schema>"
 
-    all_patterns = PLAYBOOK
+    all_patterns = PLAYBOOK + WORKED_EXAMPLES
     playbook_by_id = {p["id"]: p for p in all_patterns}
 
     # Union: manually checked patterns + any pattern a KPI points at directly,
@@ -291,7 +440,21 @@ Produce these six files, matching the structure below:
 
 **stakeholder_notes.md** (Additional Information) — Owner/DRI; anything surfaced from the Outlook/Teams search in Step {4 if has_email_search else "N/A"}; communication preferences; key decisions & open items; prior analyses to reference
 
+**prompt_helper.md** — a short, directional set of example prompts for actually working this project once the scaffold above exists: one to orient a fresh session (read the other files, summarize back), one per KPI in Step 2 tailored to its SQL logic source (playbook/pasted/described, and whether it needs Redshift-to-Databricks re-synthesis), a fan-out/validation check, and — if relevant — one for building the visual output and one for the Outlook/Teams search. These are suggestions to adapt, not a rigid script.
+
+**examples_library.md** — copy this verbatim, unedited: 19 real worked BI&A query patterns (TUA, SoM waterfall, dosing/mode-of-administration classification, rolling NBRx, HCP segmentation, cross-TA overlap, and more) in Databricks/Spark SQL, ported from the team's Redshift-era reference library. It's static and not project-specific — don't regenerate or summarize it, just include the file as-is so it ships alongside the other six.
+
 Ask me anything you need to fill gaps before generating — don't fabricate schema details, table names, or KPI logic you weren't given or couldn't confirm live.
+
+---
+
+The full content of **examples_library.md** is below — it's static and not project-specific.
+Write it out to that filename exactly as given, verbatim, with no summarizing, editing, or
+re-translation. It already resolves the Redshift-to-Databricks dialect conversion; the only
+thing left unresolved is the `<catalog>` placeholder, which should stay as-is here (it gets
+resolved per-table in schema_reference.md and kpi_definitions.md instead, not in this file).
+
+{EXAMPLES_LIBRARY_MD}
 """
     return prompt.strip()
 
@@ -333,4 +496,5 @@ def build_response(form: dict) -> dict:
     return {
         "prompt": prompt,
         "session_log_skeleton": json.dumps(log_skeleton, indent=2),
+        "suggested_prompts": gen_suggested_prompts_md(form),
     }
